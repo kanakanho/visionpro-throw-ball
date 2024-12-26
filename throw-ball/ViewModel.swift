@@ -52,6 +52,7 @@ class ViewModel {
                 entity.collision = CollisionComponent(shapes: [shape], isStatic: true)
                 entity.components.set(InputTargetComponent())
                 
+                // mode が dynamic でないと物理演算が適用されない
                 entity.physicsBody = PhysicsBodyComponent(mode: .dynamic)
                 
                 meshEntities[meshAnchor.id] = entity
@@ -129,6 +130,7 @@ class ViewModel {
         ball.components.set(InputTargetComponent(allowedInputTypes: .all))
         
         let material = PhysicsMaterialResource.generate(friction: 0.8,restitution: 0.0)
+        // mode が dynamic でないと物理演算が適用されない
         ball.components.set(PhysicsBodyComponent(shapes: [ShapeResource.generateSphere(radius: 0.05)], mass: 1.0, material: material, mode: .dynamic))
         
         contentEntity.addChild(ball)
