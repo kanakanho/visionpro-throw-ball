@@ -9,18 +9,18 @@ import SwiftUI
 
 @main
 struct throw_ballApp: App {
-
     @State private var appModel = AppModel()
-
+    @State private var model = ViewModel()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(appModel)
         }
-
-        ImmersiveSpace(id: appModel.immersiveSpaceID) {
+        
+        ImmersiveSpace(id: "ImmersiveSpace") {
             ImmersiveView()
-                .environment(appModel)
+                .environment(model)
                 .onAppear {
                     appModel.immersiveSpaceState = .open
                 }
@@ -29,5 +29,5 @@ struct throw_ballApp: App {
                 }
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
-     }
+    }
 }
