@@ -14,12 +14,18 @@ class ViewModel {
     let session = ARKitSession()
     let handTracking = HandTrackingProvider()
     let sceneReconstruction = SceneReconstructionProvider()
+    let worldTracking = WorldTrackingProvider()
     
     private var meshEntities = [UUID: ModelEntity]()
     var contentEntity = Entity()
     var latestHandTracking: HandsUpdates = .init(left: nil, right: nil)
     var leftHandEntity = Entity()
     var rightHandEntity = Entity()
+    
+    var isGlab: Bool = false
+    
+    // ここで反発係数を決定している可能性あり
+    let material = PhysicsMaterialResource.generate(friction: 0.8,restitution: 0.0)
     
     struct HandsUpdates {
         var left: HandAnchor?
@@ -99,10 +105,12 @@ class ViewModel {
                 
                 if anchor.chirality == .left {
                     latestHandTracking.left = anchor
-                    glabGesture(handAnchor: latestHandTracking.left)
+//                    guard let handAnchor = latestHandTracking.left else { continue }
+//                    glabGesture(handAnchor: handAnchor)
                 } else if anchor.chirality == .right {
                     latestHandTracking.right = anchor
-                    glabGesture(handAnchor: latestHandTracking.right)
+                    guard let handAnchor = latestHandTracking.right else { continue }
+                    glabGesture(handAnchor: handAnchor)
                 }
             default:
                 break
@@ -128,8 +136,7 @@ class ViewModel {
         ball.name = "ball"
         ball.setPosition(place, relativeTo: nil)
         ball.components.set(InputTargetComponent(allowedInputTypes: .all))
-        
-        let material = PhysicsMaterialResource.generate(friction: 0.8,restitution: 0.0)
+
         // mode が dynamic でないと物理演算が適用されない
         ball.components.set(PhysicsBodyComponent(shapes: [ShapeResource.generateSphere(radius: 0.05)], mass: 1.0, material: material, mode: .dynamic))
         
@@ -137,31 +144,60 @@ class ViewModel {
     }
     
     // 握るジェスチャーの検出
-    func glabGesture(handAnchor: HandAnchor?) {
-        guard let handAnchor = handAnchor else { return }
-        
-        guard let middleFingerTip = handAnchor.handSkeleton?.joint(.middleFingerTip).anchorFromJointTransform else { return }
+    func glabGesture(handAnchor: HandAnchor) {
+        guard let wrist = handAnchor.handSkeleton?.joint(.wrist).anchorFromJointTransform else { return }
         guard let thumbIntermediateTip = handAnchor.handSkeleton?.joint(.thumbIntermediateTip).anchorFromJointTransform else { return }
+        guard let indexFingerTip = handAnchor.handSkeleton?.joint(.indexFingerTip).anchorFromJointTransform else { return }
+        guard let middleFingerTip = handAnchor.handSkeleton?.joint(.middleFingerTip).anchorFromJointTransform else { return }
+        guard let ringFingerTip = handAnchor.handSkeleton?.joint(.ringFingerTip).anchorFromJointTransform else { return }
+        guard let littleFingerTip = handAnchor.handSkeleton?.joint(.littleFingerTip).anchorFromJointTransform else { return }
         
-        let middleFingerTipToThumbIntermediateTipDistance = distance(middleFingerTip.columns.3.xyz, thumbIntermediateTip.columns.3.xyz)
-        
-        if middleFingerTipToThumbIntermediateTipDistance > 0.04 {
-            return
-        }
+        let thumbIntermediateTipToWristDistance = simd_length_squared(wrist.columns.3.xyz - thumbIntermediateTip.columns.3.xyz)
+        let indexFingerTipToWristDistance = simd_length_squared(wrist.columns.3.xyz - indexFingerTip.columns.3.xyz)
+        let middleFingerTipToWristDistance = simd_length_squared(wrist.columns.3.xyz - middleFingerTip.columns.3.xyz)
+        let ringFingerTipToWristDistance = simd_length_squared(wrist.columns.3.xyz - ringFingerTip.columns.3.xyz)
+        let littleFingerTipToWristDistance = simd_length_squared(wrist.columns.3.xyz - littleFingerTip.columns.3.xyz)
         
         // ボールエンティティの取得
         guard let ballEntity = contentEntity.children.first(where: { $0.name == "ball" }) as? ModelEntity else { return }
         
-        let ballPosition = ballEntity.position
-        let handPosition = handAnchor.originFromAnchorTransform.columns.3.xyz
+        // ボールとの距離を計算
+        let ballPositionTransformMatrix = contentEntity.transform.matrix * ballEntity.transform.matrix
+        let handPositionTransformMatrix = handAnchor.originFromAnchorTransform * indexFingerTip
+        let ballHandLength = simd_length_squared(ballPositionTransformMatrix.columns.3.xyz - handPositionTransformMatrix.columns.3.xyz)
         
-        let distance = simd_distance(ballPosition, handPosition)
-        if distance > 0.2 {
+        // ボールとの距離で判定
+        if  ballHandLength > 0.20 {
+            isGlab = false
             return
         }
         
-        ballEntity.addForce(calculateForceDirection(handAnchor: handAnchor) * 300, relativeTo: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {}
+        // 手の形を判定
+        if thumbIntermediateTipToWristDistance > 0.01
+            && indexFingerTipToWristDistance > 0.01
+            && middleFingerTipToWristDistance > 0.01
+            && ringFingerTipToWristDistance > 0.01
+            && littleFingerTipToWristDistance > 0.01 {
+            print(Date().timeIntervalSince1970,"\tにぎらない")
+            // 物理演算を再開
+            ballEntity.components.set((PhysicsBodyComponent(shapes: [ShapeResource.generateSphere(radius: 0.05)], mass: 1.0, material: material, mode: .dynamic)))
+            isGlab = false
+            return
+        }
+        
+        print(Date().timeIntervalSince1970,"\tにぎる")
+        
+        // 握っている間は物理演算を解除
+        ballEntity.components.set((PhysicsBodyComponent(shapes: [ShapeResource.generateSphere(radius: 0.05)], mass: 1.0, material: material, mode: .static)))
+        
+        ballEntity.transform = Transform(
+            matrix: matrix_multiply(handAnchor.originFromAnchorTransform, (handAnchor.handSkeleton?.joint(.indexFingerTip).anchorFromJointTransform)!)
+        )
+        
+        isGlab = true
+        
+        // 手の向きに力を加える
+        ballEntity.addForce(calculateForceDirection(handAnchor: handAnchor) * 4, relativeTo: nil)
     }
     
     func simd_distance(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
