@@ -24,6 +24,19 @@ class ViewModel {
     
     var isGlab: Bool = false
     
+    enum OperationLock {
+        case none
+        case right
+        case left
+    }
+    
+    enum HandGlab {
+        case right
+        case left
+    }
+    
+    var entitiyOperationLock = OperationLock.none
+    
     // ここで反発係数を決定している可能性あり
     let material = PhysicsMaterialResource.generate(friction: 0.8,restitution: 0.0)
     
@@ -105,12 +118,12 @@ class ViewModel {
                 
                 if anchor.chirality == .left {
                     latestHandTracking.left = anchor
-//                    guard let handAnchor = latestHandTracking.left else { continue }
-//                    glabGesture(handAnchor: handAnchor)
+                    guard let handAnchor = latestHandTracking.left else { continue }
+                    glabGesture(handAnchor: handAnchor,handGlab: .left)
                 } else if anchor.chirality == .right {
                     latestHandTracking.right = anchor
                     guard let handAnchor = latestHandTracking.right else { continue }
-                    glabGesture(handAnchor: handAnchor)
+                    glabGesture(handAnchor: handAnchor,handGlab: .right)
                 }
             default:
                 break
@@ -144,7 +157,11 @@ class ViewModel {
     }
     
     // 握るジェスチャーの検出
-    func glabGesture(handAnchor: HandAnchor) {
+    func glabGesture(handAnchor: HandAnchor, handGlab: HandGlab) {
+        if(handGlab == .right && entitiyOperationLock == .left || handGlab == .left && entitiyOperationLock == .right) {
+            return
+        }
+
         guard let wrist = handAnchor.handSkeleton?.joint(.wrist).anchorFromJointTransform else { return }
         guard let thumbIntermediateTip = handAnchor.handSkeleton?.joint(.thumbIntermediateTip).anchorFromJointTransform else { return }
         guard let indexFingerTip = handAnchor.handSkeleton?.joint(.indexFingerTip).anchorFromJointTransform else { return }
@@ -182,6 +199,7 @@ class ViewModel {
             // 物理演算を再開
             ballEntity.components.set((PhysicsBodyComponent(shapes: [ShapeResource.generateSphere(radius: 0.05)], mass: 1.0, material: material, mode: .dynamic)))
             isGlab = false
+            entitiyOperationLock = .none
             return
         }
         
@@ -198,6 +216,7 @@ class ViewModel {
         
         // 手の向きに力を加える
         ballEntity.addForce(calculateForceDirection(handAnchor: handAnchor) * 4, relativeTo: nil)
+        entitiyOperationLock = handGlab == .right ? .right : .left
     }
     
     func simd_distance(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
